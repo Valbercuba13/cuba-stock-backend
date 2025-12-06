@@ -1,0 +1,50 @@
+{
+    "Geladeira": [
+        "agua",
+        "Refrigerante",
+        "leite",
+        "manteiga",
+        "suco",
+        "presunto",
+        "queijo"
+    ],
+
+    "Armario": [
+
+        "Arroz",
+        "Feijão",
+        "Café",
+        "Açucar",
+        "Achocolatado",
+        "Macarrão",
+        "Farinha",
+        "biscoitos",
+        "Sal"
+    ],
+
+    "Limpeza": [
+        "Detergente",
+        "Esponja",
+        "Desinfetante",
+        "Agua sanitaria",
+        "Sabão",
+        "Saco de Lixo",
+        "aromatizador"
+    ],
+
+    "Higiene": [
+        "Sabonete",
+        "Creme Dental",
+        "Papel higienico",
+        "Desodorante",
+        "Cotonetes",
+        "creme para o corpo",
+        "Shampoo",
+        "Condicionador"
+    ],
+
+    "Outros": []
+
+        
+
+}

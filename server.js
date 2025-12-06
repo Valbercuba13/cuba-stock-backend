@@ -7,9 +7,10 @@ app.use(express.json());
 app.use(cors());
 
 // CONEXÃO COM O BANCO
-const db = new sqlite3.Database('./mercado.db', (err) => {
+// Mude para algo novo:
+const db = new sqlite3.Database('./cuba_db.sqlite', (err) => {
     if (err) console.error('Erro BD:', err.message);
-    else console.log('✅ Banco de dados conectado.');
+    else console.log('✅ Banco de dados NOVO conectado.');
 });
 
 // CRIAÇÃO DE TABELAS

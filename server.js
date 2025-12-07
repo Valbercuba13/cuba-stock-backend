@@ -6,23 +6,14 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-
-app.use((req, res, next) => {
-    console.log(`📡 RECEBI: ${req.method} ${req.url}`);
-    console.log('📦 DADOS:', JSON.stringify(req.body));
-    next();
-});
-
-
-
-// CONEXÃO COM O BANCO
-// Mude para algo novo:
-const db = new sqlite3.Database('./cuba_db.sqlite', (err) => {
+// CONEXÃO COM O BANCO DE DADOS
+// Mudei o nome para garantir que crie um banco novo e limpo
+const db = new sqlite3.Database('./banco_oficial.db', (err) => {
     if (err) console.error('Erro BD:', err.message);
-    else console.log('✅ Banco de dados NOVO conectado.');
+    else console.log('✅ Banco de dados OFICIAL conectado.');
 });
 
-// CRIAÇÃO DE TABELAS
+// CRIA AS TABELAS
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS itens (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,43 +25,25 @@ db.serialize(() => {
     )`);
 });
 
-// --- ROTAS DE LEITURA ---
-app.get('/api/estoque', (req, res) => {
+// --- MIDDLEWARE DE LOG (O Dedo-Duro) ---
+app.use((req, res, next) => {
+    console.log(`📡 RECEBI: ${req.method} ${req.url}`);
+    // console.log('📦 DADOS:', JSON.stringify(req.body)); // Descomente se quiser ver o corpo
+    next();
+});
+
+// --- ROTAS (REMOVI O '/api' DA FRENTE PARA CASAR COM O APP) ---
+
+// 1. LISTAR TUDO
+app.get('/estoque', (req, res) => {
     db.all("SELECT * FROM itens", [], (err, rows) => {
         if (err) return res.status(400).json(err);
         res.json(rows);
     });
 });
 
-app.get('/api/lista-compras', (req, res) => {
-    db.all("SELECT * FROM itens WHERE qtd < min", [], (err, rows) => {
-        if (err) return res.status(400).json(err);
-        const lista = rows.map(item => {
-            let falta = item.min - item.qtd;
-            if (item.unidade === 'kg') falta = parseFloat(falta.toFixed(3));
-            return {
-                id: item.id, // IMPORTANTE: ID necessário para atualização
-                categoria: item.categoria,
-                produto: item.nome,
-                nome: item.nome,
-                unidade: item.unidade || 'un',
-                comprar: falta
-            };
-        });
-        res.json(lista);
-    });
-});
-
-app.get('/api/historico', (req, res) => {
-    db.all("SELECT * FROM historico_compras ORDER BY id DESC LIMIT 10", [], (err, rows) => {
-        if (err) return res.status(400).json(err);
-        res.json(rows);
-    });
-});
-
-// --- ROTAS DE ESCRITA ---
-
-app.post('/api/atualizar', (req, res) => {
+// 2. ATUALIZAR QUANTIDADE
+app.post('/atualizar', (req, res) => {
     const { id, novaQtd } = req.body;
     db.run("UPDATE itens SET qtd = ? WHERE id = ?", [novaQtd, id], function(err) {
         if (err) return res.status(400).json(err);
@@ -78,16 +51,71 @@ app.post('/api/atualizar', (req, res) => {
     });
 });
 
-app.post('/api/novo-item', (req, res) => {
+// 3. ADICIONAR NOVO ITEM (COM LOG DE DEPURAÇÃO)
+app.post('/novo-item', (req, res) => {
     const { categoria, nome, qtd, min, unidade } = req.body;
+    const unidadeFinal = unidade || 'un';
+    
+    console.log(`📝 Tentando gravar: ${nome} em ${categoria}...`);
+
     db.run("INSERT INTO itens (categoria, nome, qtd, min, unidade) VALUES (?, ?, ?, ?, ?)", 
-        [categoria, nome, qtd, min, unidade || 'un'], function(err) {
+        [categoria, nome, qtd, min, unidadeFinal], 
+        function(err) {
+            if (err) {
+                console.error("❌ Erro ao gravar no banco:", err.message);
+                return res.status(400).json({ error: err.message });
+            }
+            console.log(`✅ Sucesso! Item criado com ID: ${this.lastID}`);
+            res.json({ id: this.lastID });
+        });
+});
+
+// 4. LISTA DE COMPRAS
+app.get('/lista-compras', (req, res) => {
+    db.all("SELECT * FROM itens WHERE qtd < min", [], (err, rows) => {
         if (err) return res.status(400).json(err);
-        res.json({ id: this.lastID });
+        const lista = rows.map(item => {
+            let falta = item.min - item.qtd;
+            if (item.unidade === 'kg') falta = parseFloat(falta.toFixed(3));
+            return { ...item, comprar: falta, produto: item.nome };
+        });
+        res.json(lista);
     });
 });
 
-app.post('/api/editar-produto', (req, res) => {
+// 5. FINALIZAR COMPRA
+app.post('/finalizar-compra', (req, res) => {
+    const { total, itens } = req.body;
+    const dataHoje = new Date().toISOString();
+    
+    db.serialize(() => {
+        db.run(`INSERT INTO historico_compras (data, total, itens_json) VALUES (?, ?, ?)`, 
+            [dataHoje, total, JSON.stringify(itens)], 
+            function(err) {
+                if (err) return res.status(400).json({ error: err.message });
+                console.log(`💰 Venda registrada. Atualizando estoque...`);
+                
+                const stmt = db.prepare("UPDATE itens SET qtd = qtd + ? WHERE id = ?");
+                itens.forEach(item => {
+                    if (item.id && item.comprar) stmt.run(item.comprar, item.id);
+                });
+                stmt.finalize();
+                res.json({ message: "Sucesso" });
+            }
+        );
+    });
+});
+
+// 6. HISTÓRICO
+app.get('/historico', (req, res) => {
+    db.all("SELECT * FROM historico_compras ORDER BY id DESC LIMIT 10", [], (err, rows) => {
+        if (err) return res.status(400).json(err);
+        res.json(rows);
+    });
+});
+
+// EXTRAS
+app.post('/editar-produto', (req, res) => {
     const { id, nome, min, unidade } = req.body;
     db.run("UPDATE itens SET nome = ?, min = ?, unidade = ? WHERE id = ?", [nome, min, unidade, id], (err) => {
         if (err) return res.status(400).json(err);
@@ -95,60 +123,11 @@ app.post('/api/editar-produto', (req, res) => {
     });
 });
 
-app.post('/api/deletar-item', (req, res) => {
+app.post('/deletar-item', (req, res) => {
     db.run("DELETE FROM itens WHERE id = ?", [req.body.id], (err) => {
         if (err) return res.status(400).json(err);
         res.json({ message: "Deletado" });
     });
-});
-
-// --- ROTA DE FINALIZAR COMPRA (CORRIGIDA E BLINDADA) ---
-app.post('/api/finalizar-compra', (req, res) => {
-    const { total, itens } = req.body;
-    const dataHoje = new Date().toISOString();
-    
-    console.log(`🛒 Recebendo compra: R$ ${total} com ${itens.length} itens.`);
-
-    // 1. INSERE HISTÓRICO
-    db.run(`INSERT INTO historico_compras (data, total, itens_json) VALUES (?, ?, ?)`, 
-        [dataHoje, total, JSON.stringify(itens)], 
-        function(err) {
-            if (err) return res.status(400).json({ error: "Erro ao salvar histórico" });
-            
-            const idHistorico = this.lastID;
-            console.log(`✅ Histórico salvo (ID: ${idHistorico}). Iniciando atualização de estoque...`);
-
-            // 2. ATUALIZA O ESTOQUE ITEM POR ITEM (Usando Promise para esperar tudo)
-            const updates = itens.map(item => {
-                return new Promise((resolve, reject) => {
-                    // Soma o que tinha (qtd) + o que comprou (item.comprar)
-                    db.run("UPDATE itens SET qtd = qtd + ? WHERE id = ?", 
-                        [item.comprar, item.id], 
-                        function(err) {
-                            if (err) {
-                                console.error(`❌ Erro item ${item.id}:`, err.message);
-                                reject(err);
-                            } else {
-                                console.log(`🔄 Item ${item.id} atualizado: +${item.comprar}`);
-                                resolve();
-                            }
-                        }
-                    );
-                });
-            });
-
-            // 3. Só responde ao celular quando TODAS as atualizações terminarem
-            Promise.all(updates)
-                .then(() => {
-                    console.log("🚀 Estoque 100% atualizado. Respondendo ao App.");
-                    res.json({ message: "Compra finalizada com sucesso!" });
-                })
-                .catch((error) => {
-                    console.error("Erro na atualização em massa:", error);
-                    res.status(500).json({ error: "Erro parcial na atualização do estoque" });
-                });
-        }
-    );
 });
 
 const PORT = 3000;

@@ -6,6 +6,15 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+
+app.use((req, res, next) => {
+    console.log(`📡 RECEBI: ${req.method} ${req.url}`);
+    console.log('📦 DADOS:', JSON.stringify(req.body));
+    next();
+});
+
+
+
 // CONEXÃO COM O BANCO
 // Mude para algo novo:
 const db = new sqlite3.Database('./cuba_db.sqlite', (err) => {
